@@ -1,0 +1,22 @@
+0:
+  api_hash: YOUR_API_HASH
+  api_id: YOUR_API_ID
+  app_title: YOUR_APP_TITLE
+  device_model: null
+  phone_number: YOUR_PHONE_NUMBER (without "+")
+  proxy:     
+    hostname: 12.456.78.912
+    password: password
+    port: 8000
+    scheme: http or socks5
+    username: username
+  # proxy: null
+  user_agent: null
+1:
+  api_hash: YOUR_API_HASH
+  api_id: YOUR_API_ID
+  app_title: YOUR_APP_TITLE
+  device_model: null
+  phone_number: YOUR_PHONE_NUMBER (without "+")
+  proxy: null
+  user_agent: null
