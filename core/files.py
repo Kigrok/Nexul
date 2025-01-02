@@ -1,238 +1,233 @@
-import os, aiofiles.os, yaml, aiofiles, random, logging
-from tqdm.asyncio import tqdm_asyncio
-from fake_useragent import UserAgent
-from core.utils import Utils
-from core.types import ConfigDict, AppConfig
-from core.register import Register
-from core.telegram import Telegram
-from core.logger import Logger
+from data import CONFIG_FILE, SESSIONS, DATA
+from core.types import Config, AccountConfig, ProxyType
+from os import path, getcwd
+from yaml import safe_load as ysafe_load, dump as ydump
+from json import loads as jloads, dumps as jdumps
+from aiofiles.os import path as apath, makedirs as amakedirs, remove as aremove, listdir as alistdir
+from aiofiles import open as aopen
 
 class Files:
     """
-    The `Files` class is responsible for managing session files, configuration, and device-related operations 
-    within the application. It provides methods for reading, updating, and validating session files, generating 
-    random user agents and device models, and ensuring the integrity of session configurations.
+    A utility class for handling file operations asynchronously, including YAML and JSON file operations,
+    session file management, and data directory organization.
+
+    This class provides abstraction for working with configurations, sessions, and data storage.
+
     Attributes:
-        sessions_path (``str``): Path to the directory where session files are stored.
-        config_file (``str``): Path to the configuration file (in YAML format) that holds application settings.
-        extension (``str``): The file extension used for session files (e.g., ".session").
-        logger (``str``): A custom logger instance used for logging various actions and events during operations.
+        None (no instance-specific attributes due to the use of `__slots__`).
     """
-    __slots__ = ('sessions_path', 'config_file', 'extension', 'logger')
-
-    def __init__(
-            self, 
-            data: str = 'data', 
-            sessions: str ='sessions', 
-            config: str ='config.yml', 
-            extension: str='.session') -> None:
+    __slots__ = ()
+    
+    @property
+    def data_dir(self) -> str:
         """
-        Initializes the `Files` class with paths and configurations for session management.
-        Parameters:
-            data (``str``): The base directory where the session and config files are located. Defaults to 'data'.
-            sessions (``str``): The subdirectory under `data` where session files are stored. Defaults to 'sessions'.
-            config (``str``): The name of the configuration file (YAML format) that holds application settings. Defaults to 'config.yml'.
-            extension (``str``): The file extension used for session files. Defaults to '.session'.
-        Attributes:
-            sessions_path (``str``): The full path to the directory containing session files, constructed from `data` and `sessions`.
-            config_file (``str``): The full path to the configuration file, constructed from `data` and `config`.
-            extension (``str``): The file extension for session files, used to filter session-related operations.
-            logger (``Logger``): An instance of the `Logger` class for logging activity related to session and configuration management.
-        """
+        Path to the main data directory.
 
-        self.sessions_path: str = os.path.join(data, sessions)
-        self.config_file: str = os.path.join(data, config)
-        self.extension: str = extension
-        self.logger: Logger = Logger(name='Files', session='')
+        Returns:
+            ``str``: Absolute path to the data directory.
+        """
+        return path.join(getcwd(), DATA)
+
+    @property
+    def sessions_dir(self) -> str:
+        """
+        Path to the sessions directory inside the data directory.
+
+        Returns:
+            ``str``: Absolute path to the sessions directory.
+        """
+        return path.join(self.data_dir, SESSIONS)
+    
+    @property
+    def config_file(self) -> str:
+        """
+        Path to the configuration file.
+
+        Returns:
+            ``str``: Absolute path to the configuration file.
+        """
+        return path.join(self.data_dir, CONFIG_FILE)
+
+    async def _file_exists(self, path: str) -> bool:
+        """
+        Checks if a file exists.
+
+        Args:
+            path (``str``): Path to the file.
+
+        Returns:
+            ``bool``: True if the file exists, False otherwise.
+        """
+        return await apath.exists(path)
 
     async def session_folder(self) -> None:
         """
-        Asynchronously checks if the session folder exists, and if not, creates it.
-        This method ensures that the directory for storing session files is present. 
-        If the folder does not exist, it creates the necessary directory structure 
-        and logs the creation action.
+        Ensures that the sessions folder exists. Creates it if it doesn't.
         """
-        if not await aiofiles.os.path.exists(self.sessions_path):
-            await aiofiles.os.makedirs(self.sessions_path)
-            await self.logger.log(logging.DEBUG, 'Create sessions folder.')
-    
-    async def read_config(self) -> ConfigDict:
+        if not await self._file_exists(self.sessions_dir):
+            await amakedirs(self.sessions_dir)
+
+    async def read_yaml(self) -> Config:
         """
-        Asynchronously reads the configuration file and returns its content.
-        This method opens the specified configuration file in read mode, loads its 
-        contents as a dictionary using YAML, and logs the action.
+        Reads the YAML configuration file.
+
         Returns:
-            ** (``ConfigDict``): The contents of the configuration file as a dictionary.
+            ``Config``: Parsed content of the YAML file.
         """
-        async with aiofiles.open(self.config_file, mode='r') as file:
-            await self.logger.log(logging.DEBUG, 'Read config file.')
-            return yaml.safe_load(await file.read())
-    
-    async def update_config(self, content: any) -> None:
+        async with aopen(self.config_file, mode='r') as file:
+            return ysafe_load(await file.read())
+        
+    async def update_yaml(self, content: dict) -> None:
         """
-        Asynchronously updates the configuration file with new content.
-        This method writes the provided content to the configuration file in YAML format, 
-        ensuring the output is in a readable block style. It then logs the update action.
+        Updates the YAML configuration file with new content.
+
         Args:
-            content (``any``): The content to be written to the configuration file.
+            content (``dict``): Data to write into the YAML file.
         """
-        async with aiofiles.open(self.config_file, mode='w') as file:
-            await file.write(yaml.dump(content, default_flow_style=False))
-        await self.logger.log(logging.DEBUG, 'Update config file.')
+        async with aopen(self.config_file, mode='w') as file:
+            await file.write(ydump(content, default_flow_style=False))
 
-    async def get_session_files(self) -> list[str]:
+    async def get_sessions_names(self, filter: str = 'app_title') -> list:
         """
-        Asynchronously retrieves a list of session file names without extensions.
-        This method scans the session folder for files that match the configured session file extension 
-        and returns their names without the extension. A debug log is recorded upon execution.
-        Returns:
-            ** (``list``): A list of session file names (without extensions).
-        """
-        await self.logger.log(logging.DEBUG, 'Retrieves a list of all session files.')
-        return [os.path.splitext(file)[0] for file 
-            in await aiofiles.os.listdir(self.sessions_path) 
-            if file.endswith(self.extension)]
+        Retrieves the names of sessions based on a filter.
 
-    async def generate_device(
-            self, 
-            platform='mobile', 
-            os='ios', 
-            browser='safari') -> tuple[str, str]:
-        """
-        Asynchronously generates a random user agent and device model.
-        This method creates a `UserAgent` instance configured with the specified platform, operating system, 
-        and browser. It then generates a random user agent string and device model, which includes a 
-        randomized device version and optional suffixes. A debug log is recorded upon execution.
-        Parameters:
-            platform (``str``): The platform for the user agent (default is 'mobile').
-            os (``str``): The operating system for the user agent (default is 'ios').
-            browser (``str``): The browser for the user agent (default is 'safari').
-        Returns:
-            ** (``tuple``): A tuple containing the generated user agent and device model:
-        """
-        ua: UserAgent = UserAgent(
-            browsers=browser, 
-            os=os, 
-            platforms=platform)
-        user_agent: str = (ua.random).strip()
-        device_model: str = (' '.join([
-            await Utils().regular(user_agent), 
-            str(random.randint(11, 15)), 
-            random.choice([' ', 'Pro', 'Max', 'Pro Max'])])).strip()
-        await self.logger.log(logging.DEBUG, 'Generate a random user agent and device model.')
-        return user_agent, device_model
-    
-    async def replace_device(self) -> None:
-        """
-        Asynchronously updates the device data in the configuration for sessions that have missing or incomplete
-        device information.
-        This method reads the current configuration file and identifies sessions where the `device_model` or
-        `user_agent` fields are missing. For each of these sessions, it generates new device data and updates 
-        the session's configuration. A debug log is recorded for each session that has its device data updated. 
-        Finally, the configuration file is updated to reflect these changes.
-        """
-        config: ConfigDict = await self.read_config()
-        modified_sessions: list[AppConfig] = [
-            session for session in config.values() 
-            if session.get('device_model') is None or session.get('user_agent') is None]
-        if modified_sessions:
-            for session in modified_sessions:
-                session['user_agent'], session['device_model'] = await self.generate_device()
-                await self.logger.log(logging.DEBUG, f"Updated device_data for session [{session.get('app_title')}].")
-            await self.update_config(config)
-
-    async def check_sessions(self) -> None:
-        """
-        Asynchronously checks the existence of session files for all configured sessions.
-        This method iterates through all sessions defined in the configuration file. For each session, it constructs 
-        the file path for the corresponding session file based on the session's title and the file extension. It then 
-        checks if the session file exists in the specified session directory. If a session file is missing, it triggers 
-        the registration of a new session by calling `Register(session=session).register_session()`.
-        Debug logging is performed to indicate the start of the check process.
-        """
-        await self.logger.log(logging.DEBUG, 'Check if session files exist.')
-        for _, session in (await self.read_config()).items():
-            session_file_path: str = os.path.join(
-                self.sessions_path, 
-                session.get('app_title') + self.extension)        
-            if not await aiofiles.os.path.exists(session_file_path):
-                await Register(session=session).register_session()
-
-    async def validate_sessions(self) -> None:
-        """
-        Asynchronously validates session files and cleans up invalid sessions.
-        This method first disables INFO level logging to reduce verbosity during the validation process. It then 
-        uses `tqdm_asyncio` to provide an asynchronous progress bar while iterating through the list of session files 
-        retrieved by `get_session_files()`. For each session file, it calls the `cleanup` method to validate and, if 
-        necessary, remove the file.
-        After completing the validation and cleanup of session files, it re-enables logging and ensures that all session 
-        files are checked by calling `check_sessions()`.
-        """
-        logging.disable(logging.INFO)
-        try:
-            async for _ in tqdm_asyncio(
-                await self.get_session_files(), 
-                desc='Validating', 
-                unit='session',
-                colour='cyan'):
-                await self.cleanup(_)
-        finally:
-            logging.disable(logging.NOTSET)
-            await self.check_sessions()
-
-    async def cleanup(self, name: str) -> None:
-        """
-        Asynchronously cleans up an invalid session file.
-        This method attempts to validate the session associated with the given `name` using the `Telegram` class. If the 
-        session is determined to be invalid (i.e., `validate_session()` returns `False`), it removes the corresponding 
-        session file from the filesystem. The file path is constructed using `self.sessions_path`, `name`, and 
-        `self.extension`.
-        After removing the file, the method logs an informational message indicating that the session file was removed.
         Args:
-            name (``str``): The name of the session to be cleaned up.
-        """
+            filter (``str``): The key to filter session data by. Defaults to 'app_title'.
 
-        if not await Telegram(
-            name=name,
-            proxy=await self.get_proxy(name=name)).validate_session():
-            await aiofiles.os.remove(os.path.join(self.sessions_path, name + self.extension))
-            await self.logger.log(logging.INFO, f'Removed invalid session file [{name}]')
+        Returns:
+            ``list``: List of session names matching the filter.
+        """
+        return list(session.get(filter) for session in (await self.read_yaml()).values())
+  
+    async def get_folder_sessions(self) -> list:
+        """
+        Retrieves the list of session files in the sessions folder.
 
-    async def get_agent(self, name: str) -> str:
-        """
-        Asynchronously retrieves the user agent associated with a given application name.
-        This method reads the configuration file and searches for the entry that matches the provided `name` (which 
-        represents the application title). If a matching entry is found, it returns the corresponding user agent. If 
-        no matching entry is found, it returns an empty string.
-        Before performing the retrieval, the method logs a debug message indicating that it is attempting to get the user 
-        agent for the specified `name`.
-        Args:
-            name (``str``): The application title for which the user agent is to be retrieved.
         Returns:
-            ** (``str``): The user agent associated with the given application title, or an empty string if not found.
+            ``list``: List of session file names without extensions.
         """
-        await self.logger.log(logging.DEBUG, f'Get user agent for [{name}].')
-        return next(
-            (session.get('user_agent', '') for session in 
-            (await self.read_config()).values() 
-            if session.get('app_title') == name),'')
-    
-    async def get_proxy(self, name: str) -> dict | None:
+        files: list = await alistdir(self.sessions_dir)
+        return list(path.splitext(file)[0] for file in files if file.endswith(f'.session'))
+
+    async def get_info(self, name: str, filter: str) -> ProxyType | str | None:
         """
-        Asynchronously retrieves the proxy configuration associated with a given application name.
-        This method reads the configuration file and searches for the entry that matches the provided `name` (which 
-        represents the application title). If a matching entry is found, it returns the corresponding proxy configuration 
-        as a dictionary. If no matching entry is found, it returns an empty dictionary.
-        Before performing the retrieval, the method logs a debug message indicating that it is attempting to get the proxy 
-        for the specified `name`.
+        Retrieves specific information from a session by name.
+
         Args:
-            name (``str``): The application title for which the proxy configuration is to be retrieved.
+            name (``str``): The session name.
+            filter (``str``): The key to retrieve from the session.
+
         Returns:
-            ** (``dict | None``): The proxy configuration associated with the given application title, or an empty dictionary if not found.
+            ``ProxyType`` | ``str`` | ``None``: The value corresponding to the filter, or None if not found.
         """
-        await self.logger.log(logging.DEBUG, f'Get proxy for [{name}].')
-        return next(
-            (session.get('proxy', '') for session in 
-            (await self.read_config()).values() 
-            if session.get('app_title') == name),'')
+        return next((session.get(filter) for session in (await self.read_yaml()).values()
+            if session.get('app_title') == name), None)
     
+    async def get_session_data(self, name: str) -> AccountConfig | None:
+        """
+        Retrieves all data for a specific session by name.
+
+        Args:
+            name (``str``): The session name.
+
+        Returns:
+            ``AccountConfig`` | ``None``: The session data, or None if not found.
+        """
+        return next((session for session in (await self.read_yaml()).values()
+            if session.get('app_title') == name), None)
+    
+    async def _session_file_path(self, name: str) -> str:
+        """
+        Generates the path to a session file by name.
+
+        Args:
+            name (``str``): The session name.
+
+        Returns:
+            ``str``: Path to the session file.
+        """
+        return path.join(self.sessions_dir, name + f'.session')
+    
+    async def check_file_session(self, name: str) -> str | None:
+        """
+        Checks if a session file exists.
+
+        Args:
+            name (``str``): The session name.
+
+        Returns:
+            ``str`` | ``None``: Session name if the file exists, otherwise None.
+        """
+        if await self._file_exists(await self._session_file_path(name=name)):
+            return name
+        
+    async def remove_session(self, name: str) -> None:
+        """
+        Deletes a session file by name.
+
+        Args:
+            name (``str``): The session name.
+        """
+        await aremove(await self._session_file_path(name=name))
+
+    async def read_json(self, path: str) -> dict:
+        """
+        Reads a JSON file.
+
+        Args:
+            path (``str``): Path to the JSON file.
+
+        Returns:
+            ``dict``: Parsed JSON content.
+        """
+        async with aopen(path, mode='r') as file:
+            return jloads(await file.read())
+        
+    async def _file_path(self, name: str, extension: str = '.json') -> str:
+        """
+        Generates a file path for a given name and extension.
+
+        Args:
+            name (``str``): File name.
+            extension (``str``): File extension. Defaults to '.json'.
+
+        Returns:
+            ``str``: Full file path.
+        """
+        return path.join(self.data_dir, name + extension)
+    
+    async def save_json(self, name: str, data: dict) -> None:
+        """
+        Saves data to a JSON file.
+
+        Args:
+            name (``str``): File name.
+            data (``dict``): Data to save.
+        """
+        async with aopen(await self._file_path(name=name), mode='w') as file:
+            await file.write(jdumps(data))
+        
+    async def save_image(self, content: bytes, name: str) -> None:
+        """
+        Saves image content to a file.
+
+        Args:
+            content (``bytes``): Image content as bytes.
+            name (``str``): File name.
+        """
+        async with aopen(await self._file_path(name=name, extension='.png'), mode='wb') as file:
+            await file.write(content)
+
+    async def get_file_value(self, file: str, id: str) -> str | None:
+        """
+        Retrieves a value from a JSON file based on an ID.
+
+        Args:
+            file (``str``): File name.
+            id (``str``): ID to search for.
+
+        Returns:
+            ``str`` | ``None``: The value corresponding to the ID, or None if not found.
+        """
+        return next(task['value'] for task in await self.read_json(path=await self._file_path(name=file))
+            if task['id'] == id)

@@ -1,129 +1,185 @@
-from pyrogram.raw.functions.messages import RequestWebView
-from pyrogram import Client, errors
-from urllib.parse import unquote
-from core.logger import Logger
+from pyrogram import Client
+from pyrogram.errors import FloodWait, RPCError
+from pyrogram.raw.functions.account import UpdateStatus
+from pyrogram.raw.types import InputBotAppShortName, InputPeerUser, AppWebViewResultUrl
+from pyrogram.raw.functions.messages import RequestWebView, RequestAppWebView
+from uvloop import install as uinstall
+from asyncio import sleep as asleep
+from core.files import Files
+from core.proxy import Proxy
 from core.utils import Utils
-from re import search
-from os import path
-import logging
+from core.types import ProxyType
+from logs import Logger
 
 class Telegram:
     """
-    Handles interactions with Telegram through the Pyrogram library, including session validation and data retrieval.
-    This class is responsible for managing a Telegram client instance, which can be used to interact with Telegram's API. 
-    It includes methods to validate the current session and retrieve data from specific URLs within Telegram. The client 
-    can be configured with an optional proxy.
-    Attributes:
-        name (``str``): The name associated with the Telegram client.
-        workdir (``str``): The directory path where session data is stored.
-        proxy (``dict | None``): The proxy settings to be used by the Telegram client, if any.
-        client (``Client``): The Pyrogram client instance used to interact with Telegram.
-        logger (``Logger``): An instance of the Logger class used for logging various events and errors.
-    """
-    __slots__ = ('name', 'workdir', 'client', 'proxy', 'logger')
+    A class that handles Telegram client management using the Pyrogram library.
 
-    def __init__(
-            self, 
-            name: str, 
-            proxy: dict| None, 
-            data: str = 'data', 
-            sessions: str = 'sessions') -> None:
+    This class provides methods to:
+    - Create and configure a Telegram client.
+    - Keep the client online and ensure session validity.
+    - Interact with Telegram bots and retrieve web data or app data.
+
+    Attributes:
+        __name (str): The name of the session used to manage configuration and logs.
+        client (Client): The instance of the Pyrogram client for interacting with Telegram.
+        logger (Logger): The logger instance for logging errors and information.
+    """
+
+    def __init__(self, name: str) -> None:
         """
-        Initializes a Telegram client with optional proxy settings and sets up a logger.
-        Parameters:
-            name (``str``): The name to be assigned to the Telegram client.
-            proxy (``dict | None``): Optional dictionary containing proxy settings. If None, no proxy is used.
-            data (``str``): Directory where session data is stored (default is 'data').
-            sessions (``str``): Subdirectory within 'data' where session files are located (default is 'sessions').
-        Attributes:
-            name (``str``): The name associated with the Telegram client.
-            workdir (``str``): The path to the directory where session data is stored, constructed from 'data' and 'sessions'.
-            proxy (``dict | None``): The proxy settings to be used by the Telegram client, if any.
-            client (``Client``): An instance of the Pyrogram Client initialized with the given name and workdir.
-            logger (``Logger``): An instance of the Logger class for logging various events related to the Telegram client.
+        Initializes the Telegram class with the provided session name and configures the logger.
+
+        Args:
+            name (``str``): The session name used for logging and file management.
         """
-        self.name: str = name
-        self.workdir: str = path.join(data, sessions)
-        self.proxy: dict | None = proxy
-        self.client: Client = Client(
-                name=self.name,
-                workdir=self.workdir)
-        self.logger: Logger = Logger(name='Telegram', session=self.name)
+        self.__name: str = name
+        self.client: Client = None
+        self.logger: Logger = Logger(
+            name=__class__.__name__, 
+            session=self.__name)
+        uinstall() # Install uvloop for improved asyncio performance
+
+    @property
+    def workdir(self) -> str:
+        """
+        Property to get the session's working directory.
+
+        Returns:
+            ``str``: The path to the session's working directory.
+        """
+        return Files().sessions_dir
+    
+    async def _get_proxy(self) -> None:
+        """
+        Configures the proxy settings for the client.
+
+        This method checks if a proxy is configured for the session and applies it to the client.
+        """
+        proxy: ProxyType | None = await Proxy(name=self.__name).get_tg_proxy()
         if proxy is not None:
-            self.client.proxy = self.proxy            
+            self.client.proxy = proxy
+
+    async def _create_client(self) -> None:
+        """
+        Creates a new Telegram client if it doesn't exist.
+
+        This method initializes the `Client` instance using session configuration, sets the language code,
+        and applies any configured proxy settings.
+        """
+        if self.client is None:
+            self.client: Client = Client(
+                name=self.__name, 
+                workdir=self.workdir, 
+                lang_code='en')
+            await self._get_proxy()
+
+    async def keep_alive(self) -> None:
+        """
+        Keeps the client online by updating its status.
+
+        This method sends an update to Telegram to set the client's status to 'online'.
+        """
+        try:
+            await self.client.invoke(UpdateStatus(offline=False))
+        except Exception as e:
+            await self.logger.log_error(f'Failed to update online status: {e}')
+
+    async def ensure_subscription(self, channel: str = 'venvnft') -> None:
+        """
+        Ensures that the client is subscribed to a specific channel.
+
+        This method checks if the client is a member of the specified channel and updates the online status.
+        
+        Args:
+            channel (``str``): The name of the channel to check subscription for (default is 'venvnft').
+        """
+        await self._create_client()
+        async with self.client:
+            await self.client.get_chat_member(
+                (await self.client.get_chat(channel)).id, 
+                (await self.client.get_me()).id)
+            await self.keep_alive()
 
     async def validate_session(self) -> bool:
         """
-        Validates the current Telegram session by attempting to retrieve the client's information.
-        This method checks if the session is active and valid by using the `get_me` method of the Pyrogram Client.
-        If the session is valid, it logs a success message and returns True. If there is an RPC error or any other
-        exception during the validation, it logs an appropriate error message and returns False.
+        Validates the current session by checking if the client can access its own details.
+
+        This method ensures that the session is active by attempting to get the client's own details 
+        and updating its online status.
+
         Returns:
-            ** (``bool``): True if the session is valid, False otherwise.
+            ``bool``: `True` if the session is valid, `False` otherwise.
         """
+        await self._create_client()
         try:
-            async with self.client as client:
-                await client.get_me()
-                await self.logger.log(logging.DEBUG, 'Session validation successful.')
+            async with self.client:
+                await self.client.get_me()
+                await self.keep_alive()
                 return True
-        except errors.RPCError as e:
-            await self.logger.log(logging.ERROR, f'Session validation failed: {e}')
+        except RPCError as e:
+            await self.logger.log_error(f'Session validation failed: {e}')
             return False
         except Exception as e:
-            await self.logger.log(logging.ERROR, f'An unexpected error occurred during session validation: {e}')
+            await self.logger.log_error(f'An unexpected error occurred during session validation: {e}')
             return False
+        
+    async def get_web_data(self, app: str, url: str, platform: str = 'ios') -> str:
+        """
+        Retrieves web data from a Telegram bot or application.
 
-    async def get_data(
-            self, 
-            app: str, 
-            url: str, 
-            platform: str ='ios') -> str:
-        """
-        Retrieves web data from a specified URL within the context of a Telegram session.
-        This method uses the Pyrogram Client to invoke a web view request, which allows interaction with a web page
-        within the Telegram app. It attempts to resolve the peer and bot references, and then fetches the web page
-        data. Upon successful retrieval, it extracts data from the URL and logs a success message.
-        Parameters:
-            app (``str``): The name of the application or bot for which the web view is requested.
-            url (``str``): The URL from which to retrieve data.
-            platform (``str``): The platform for which the web view is requested (default is 'ios').
+        This method interacts with a bot to retrieve a URL, which can be used to display web content.
+        
+        Args:
+            app (``str``): The name or username of the bot.
+            url (``str``): The URL to request web data from.
+            platform (``str``): The platform for which the request is made (default is 'ios').
+
         Returns:
-            ** (``str``): The extracted data from the URL.
-        Raises:
-            Exception: If there is any error while retrieving or processing the web data, an error is logged and the exception is raised.
+            ``str``: The resulting URL from the web view request.
         """
+        await self._create_client()
         try:
-            async with self.client as client:
-                web_view = await client.invoke(RequestWebView(
-                    peer=await client.resolve_peer(app),
-                    bot=await client.resolve_peer(app),
-                    platform=platform,
-                    from_bot_menu=True,
-                    url=url))
-                await self.logger.log(logging.DEBUG, f'Successfully retrieved web data for session in [{app}]')
-                return await self._extract_data_from_url(web_view.url)
+            async with self.client:
+                peer: InputPeerUser = await self.client.resolve_peer(app)
+                web_view: AppWebViewResultUrl = await self.client.invoke(RequestWebView(
+                    peer=peer, bot=peer, platform=platform, 
+                    from_bot_menu=True,url=url))
+                await self.keep_alive()
+                return web_view.url
+        except FloodWait as e:
+            await asleep(1)
+            return await self.get_web_data(app, url, platform) 
         except Exception as e:
-            await self.logger.log(logging.ERROR, f'Error getting Telegram web data in [{app}]: {e}')
-            raise
+            await self.logger.log_error(f'Error getting Telegram web data in [{app}]: {e}')
 
-    async def _extract_data_from_url(self, url: str) -> str:
+    async def get_app_data(self, app: str, platform: str = 'ios') -> str:
         """
-        Extracts and decodes data from a given URL.
-        This method takes a URL as input and uses a utility function to extract relevant data from the URL. The data
-        is then URL-decoded twice to handle double encoding. If data extraction is successful, it logs a success message
-        and returns the decoded data. If no data is found, it logs an error message.
-        Parameters:
-            url (``str``): The URL from which to extract data.
+        Retrieves app data from a Telegram bot.
+
+        This method retrieves data from a Telegram bot using the `RequestAppWebView` function to interact 
+        with the bot and obtain its response.
+
+        Args:
+            app (``str``): The name or username of the bot.
+            platform (``str``): The platform for which the request is made (default is 'ios').
+
         Returns:
-            ** (``str``): The extracted and decoded data from the URL.
-        Raises:
-            None: Logs an error if no data is found but does not raise an exception.
+            ``str``: The resulting URL from the app data request, processed by the `Utils` class.
         """
-        await self.logger.log(logging.DEBUG, f'Extracting data from URL.')
-        match: str = await Utils().regular(data=url)
-        if match:
-            extract_data: str = unquote(unquote(match.group(1)))
-            await self.logger.log(logging.DEBUG, 'Data extracted successfully.')
-            return extract_data
-        else:
-            await self.logger.log(logging.ERROR, f'No data found in URL: {url}')
+        await self._create_client()
+        try:
+            async with self.client:
+                peer: InputPeerUser = await self.client.resolve_peer(app)
+                input_bot_app: InputBotAppShortName = InputBotAppShortName(bot_id=peer, short_name='app')
+                web_view: AppWebViewResultUrl = await self.client.invoke(RequestAppWebView(
+                    peer=peer, app=input_bot_app,
+                    platform=platform, write_allowed=True))
+                await self.keep_alive()
+                return await Utils(name=self.__name).regular(web_view.url)
+        except FloodWait as e:
+            await asleep(1)
+            return await self.get_app_data(app, platform)  
+        except Exception as e:
+            await self.logger.log_error(f'Error getting Telegram web app data in [{app}]: {e}')
+            raise

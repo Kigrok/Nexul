@@ -1,40 +1,63 @@
-from core.files import Files
 from pyfiglet import Figlet
-from apps.blum import Blum
-from asyncio import run, gather
-from random import randint
+from tqdm.asyncio import tqdm_asyncio
+from core.files import Files
+from apps.blum.blum import Blum
+from core.telegram import Telegram
+from core.register import TGRegister
+from asyncio import gather, run
 
-async def work_files():
+async def _validate(name: str) -> None:
     """
-    Handles the file management workflow by:
-    - Ensuring the session folder exists.
-    - Replacing missing device information in the configuration.
-    - Checking if all required session files are present.
-    - Validating the existing session files and removing any invalid ones.
+    Validates the Telegram session by checking if it is still active.
+    If not, it removes the session and re-registers it.
+
+    Args:
+        name (``str``): The session name to validate.
     """
-    await Files().session_folder()
-    await Files().replace_device()
-    await Files().check_sessions()
-    await Files().validate_sessions()
+    if not await Telegram(name=name).validate_session():
+        await Files().remove_session(name=name)
+        await TGRegister(name=name).register_session()
+
+async def clear():
+    """
+    Clears invalid sessions by removing them from the session folder.
+    This function checks for sessions in the folder that are not in the list of valid sessions.
+    """
+    for session in set(await Files().get_folder_sessions()) - set(await Files().get_sessions_names()):
+        await Files().remove_session(name=session)
+
+async def validate_sessions() -> None:
+    """
+    Validates all sessions by checking each one for activity. 
+    If a session is invalid, it removes the session and registers it again.
+    After all sessions are validated, it clears any outdated or invalid sessions.
+    """
+    for session in tqdm_asyncio(
+            await Files().get_sessions_names(), 
+            desc='Validating', unit='session',
+            colour='cyan'):
+        name: str = await Files().check_file_session(name=session)
+        if name != None: await _validate(name=name)
+        else: await TGRegister(name=session).register_session()
+    await clear()
 
 async def blum():
     """
-    Creates and runs Blum instances for each session retrieved from the session files.
-    Uses asyncio.gather to run all the Blum tasks concurrently.
+    Continuously processes Blum tasks for each session present in the folder.
+    This method is designed to run indefinitely, processing Blum tasks asynchronously.
     """
     while True:
         tasks: list = [
-            Blum(name=session).main() for session in await Files().get_session_files()]
+            Blum(name=session).main() for session in await Files().get_folder_sessions()]
         await gather(*tasks)
 
 async def main():
     """
-    Orchestrates the main workflow:
-    - Executes the file operations (work_files).
-    - Initiates the Blum processes (blum).
+    The main entry point of the application. 
+    Validates all sessions and runs Blum tasks concurrently.
     """
-    await work_files()
-    await blum()
+    await validate_sessions()
+    await gather(blum())
 
 def banner() -> None:
     """
@@ -46,6 +69,6 @@ def banner() -> None:
         '\x1b[0m')
     print('\tCreated by \x1b[38;5;85mhttps://github.com/Kigrok\x1b[0m\n')
 
-if __name__=='__main__':
+if __name__ == '__main__':
     banner()
     run(main())

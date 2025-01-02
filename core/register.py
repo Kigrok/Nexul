@@ -1,117 +1,139 @@
-from pyrogram import Client, errors
-from core.types import AppConfig
-from core.logger import Logger
-from os import path
-import logging
+from pyrogram import Client
+from logs import Logger
+from core.files import Files
+from core.proxy import Proxy
+from core.utils import Utils
+from core.types import AccountConfig, ProxyType
 
-class Register:
+class TGRegister:
     """
-    Handles the registration of a Telegram session using the Pyrogram client.
-    The `Register` class is responsible for initializing the Telegram client with the provided session configuration
-    and handling the registration process. It includes methods for setting up the client, managing errors, and
-    logging relevant information throughout the registration process.
+    A class that handles the registration of a new Telegram client session using provided session data.
+
+    This class is responsible for:
+    - Creating and managing a Telegram client using the Pyrogram library.
+    - Setting up session details, device information, and proxy configurations.
+    - Logging and handling errors during the registration process.
+
     Attributes:
-        api_id (``int``): The API ID used for client authorization.
-        api_hash (``str``): The API hash used for client authorization.
-        app_title (``str``): The title of the application associated with the session.
-        phone_number (``str``): The phone number used for client authentication.
-        device_model (``str``): The device model used for the client session.
-        workdir (``str``): Directory path for storing session files.
-        client (``Client``): An instance of the Pyrogram `Client` used for interacting with Telegram.
-        proxy (``dict | None``): Optional proxy configuration for the client.
-        logger (``Logger``): An instance of the `Logger` class for logging events related to the registration process.
+        __name (``str``): The name of the session.
+        logger (``Logger``): Logger instance for logging session events.
+        client (``Client``): The Pyrogram client instance used for Telegram interactions.
     """
-    __slots__ = ('api_id', 'api_hash', 'app_title', 'phone_number', 'device_model', 'workdir', 'client', 'proxy', 'logger')
+    __slots__ = ('__name', 'logger', 'client')
 
-    def __init__(self, session: AppConfig) -> None:
+    def __init__(self, name: str) -> None:
         """
-        Initializes the `Register` class with configuration details for a Telegram session.
-        Parameters:
-            session (``AppConfig``): A configuration object containing details required for Telegram client initialization.
-        Attributes:
-            api_id (``int``): Stores the API ID extracted from the session configuration.
-            api_hash (``str``): Stores the API hash extracted from the session configuration.
-            app_title (``str``): Stores the application title extracted from the session configuration.
-            phone_number (``str``): Stores the phone number extracted from the session configuration.
-            proxy (``dict | None``): Stores the optional proxy settings extracted from the session configuration.
-            device_model (``str``): Stores the device model extracted from the session configuration.
-            workdir (``str``): Directory path for storing session files, set to 'data/sessions'.
-            client (``Client``): An instance of the Pyrogram `Client` initialized with the provided configuration.
-            logger (``Logger``): An instance of the `Logger` class for logging events related to the registration process.
-        Note:
-            - The `Client` instance is configured with `hide_password=True` to prevent displaying the password in logs.
-            - If a proxy is provided, it is set for the `Client` instance.
+        Initializes the TGRegister instance with the session name.
+
+        Args:
+            name (``str``): The name of the session.
         """
-        self.api_id: int = session.get('api_id')
-        self.api_hash: str = session.get('api_hash')
-        self.app_title: str = session.get('app_title')
-        self.phone_number: str = str(session.get('phone_number'))
-        self.proxy: dict | None = session.get('proxy')
-        self.device_model: str = session.get('device_model')
-        self.workdir: str = path.join('data', 'sessions')
-        self.client: Client = Client(
-                name=self.app_title,
-                api_id=self.api_id,
-                api_hash=self.api_hash,
-                phone_number=self.phone_number,
-                device_model=self.device_model,
-                workdir=self.workdir,
-                hide_password=True)
+        self.__name: str = name
         self.logger: Logger = Logger(
-            name='Telegram Register', 
-            session=self.app_title)
-        if self.proxy is not None:
-            self.client.proxy = self.proxy
-
-    async def register_session(self):
+            name=__class__.__name__, 
+            session=self.__name)
+        
+    @property
+    def workdir(self) -> str:
         """
-        Registers a new Telegram session and handles various errors that may occur during the process.
-        This method performs the following steps:
-        1. Logs the start of the session registration process at the DEBUG level.
-        2. Attempts to create a new session by sending a message to the user's "me" chat to confirm successful authorization.
-        3. Handles specific errors that may arise during the session registration process and logs them accordingly:
-            - `FloodWait`: Raised when the server imposes a wait time due to too many requests; logs an error and advises waiting.
-            - `RPCError`: General error for RPC issues; logs the error message.
-            - `AuthKeyDuplicated`: Raised when the authentication key is duplicated; logs the error message.
-            - `AuthKeyUnregistered`: Raised when the authentication key is unregistered; logs the error message.
-            - `AuthTokenExpired`: Raised when the authentication token has expired; logs the error message.
-            - `PhoneCodeInvalid`: Raised when an invalid phone code is provided; logs the error message.
-            - `PhoneCodeExpired`: Raised when the phone code has expired; logs the error message.
-            - `PhoneNumberBanned`: Raised when the phone number is banned; logs the error message.
-            - `SessionPasswordNeeded`: Raised when a session password is required but not provided; logs the error message.
-            - `UserAlreadyParticipant`: Raised when the user is already a participant; logs the error message.
-            - `PeerIdInvalid`: Raised when the peer ID is invalid; logs the error message.
-            - Catches all other unexpected exceptions and logs them as errors.
-        """
+        Property that returns the working directory for session files.
 
-        await self.logger.log(logging.DEBUG, "Starting session registration.")
+        Returns:
+            ``str``: The path to the session directory.
+        """
+        return Files().sessions_dir
+
+    async def _clinet_log(self) -> None:
+        """
+        Logs the creation of the client.
+
+        This is used for logging the process of client creation.
+        """
+        await self.logger.log_info(
+            'Create client.')
+        
+    async def _session_log(self) -> None:
+        """
+        Logs the creation of the session.
+
+        This is used to log when the session is created and ready.
+        """
+        await self.logger.log_info(
+            f'Create session.')
+        
+    async def _erroe_log(self, error: str) -> None:
+        """
+        Logs an error that occurred during the process.
+
+        Args:
+            error (``str``): The error message to log.
+        """
+        await self.logger.log_error(
+            f'An unexpected error occurred: {error}.')
+        
+    async def _get_session(self) -> AccountConfig:
+        """
+        Retrieves session data from files.
+
+        Returns:
+            ``AccountConfig``: The session configuration data.
+        """
+        return await Files().get_session_data(name=self.__name)
+    
+    async def add_device(self) -> None:
+        """
+        Adds device information if it's not already present.
+
+        This method checks if the device model and user agent are already set in the session data.
+        If not, it will use the `Utils` class to add the device details.
+        """
+        if await Files().get_info(name=self.__name, filter='device_model') == None \
+            or await Files().get_info(name=self.__name, filter='user_agent') == None:
+            await Utils(name=self.__name).add_device()
+
+    async def _get_client(self) -> None:
+        """
+        Initializes the Telegram client with session details.
+
+        This method retrieves session data and uses it to initialize a Pyrogram `Client` instance.
+        It sets the necessary parameters like API ID, API hash, phone number, device model, etc.
+        """
+        await self._clinet_log()
+        session: AccountConfig = await self._get_session()
+        self.client: Client = Client(
+            name=session.get('app_title'),
+            api_id=session.get('api_id'),
+            api_hash=session.get('api_hash'),
+            phone_number=str(session.get('phone_number')),
+            device_model=session.get('device_model'),
+            workdir=self.workdir,
+            password=str(session.get('password')))
+        
+    async def _get_proxy(self) -> None:
+        """
+        Retrieves and sets the proxy configuration for the client.
+
+        If a proxy is configured for the session, it will be set up for the `Client` instance.
+        """
+        proxy: ProxyType = await Proxy(name=self.__name).get_tg_proxy()
+        if proxy is not None:
+            self.client.proxy = proxy
+
+    async def register_session(self) -> None:
+        """
+        Registers a new session by creating a client, adding device information, and setting up the proxy.
+
+        The method combines all steps to set up the Telegram client and session, including logging into the 
+        Telegram API and sending a confirmation message.
+
+        In case of an error, the error will be logged.
+        """
+        await self.add_device()
+        await self._get_client()
+        await self._get_proxy()
         try:
-            await self.logger.log(logging.INFO, f'Create new session.')
-            async with self.client:
-                await self.client.send_message("me", "[OK] Authorization in Nexul!")
-        except errors.FloodWait as e:
-            await self.logger.log(logging.ERROR, f'Flood wait error: {e}. Please wait and try again later.')
-        except errors.RPCError as e:
-            await self.logger.log(logging.ERROR, f'RPC error: {e}.')
-        # except errors.NetworkError as e:
-        #     await self.logger.log(logging.ERROR, f'Network error: {e}.')
-        except errors.AuthKeyDuplicated as e:
-            await self.logger.log(logging.ERROR, f'Auth key duplicated error: {e}.')
-        except errors.AuthKeyUnregistered as e:
-            await self.logger.log(logging.ERROR, f'Auth key unregistered error: {e}.')
-        except errors.AuthTokenExpired as e:
-            await self.logger.log(logging.ERROR, f'Auth token expired error: {e}.')
-        except errors.PhoneCodeInvalid as e:
-            await self.logger.log(logging.ERROR, f'Phone code invalid error: {e}.')
-        except errors.PhoneCodeExpired as e:
-            await self.logger.log(logging.ERROR, f'Phone code expired error: {e}.')
-        except errors.PhoneNumberBanned as e:
-            await self.logger.log(logging.ERROR, f'Phone number banned error: {e}.')
-        except errors.SessionPasswordNeeded as e:
-            await self.logger.log(logging.ERROR, f'Session password needed error: {e}.')
-        except errors.UserAlreadyParticipant as e:
-            await self.logger.log(logging.ERROR, f'User already participant error: {e}.')
-        except errors.PeerIdInvalid as e:
-            await self.logger.log(logging.ERROR, f'Peer ID invalid error: {e}.')
+            await self._session_log()
+            async with self.client as client:
+                await client.send_message('me', '[OK] Authorization in Nexul!')
         except Exception as e:
-            await self.logger.log(logging.ERROR, f'An unexpected error occurred: {e}.')
+            await self._erroe_log(error=e)

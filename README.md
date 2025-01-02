@@ -1,5 +1,5 @@
 ## Nexul
-[![python](https://img.shields.io/badge/Python-3.12-3776AB.svg?&logo=python&logoColor=python)](https://www.python.org) [![Pyrogram](https://img.shields.io/badge/Pyrogram-2.0.106-orange)](https://docs.pyrogram.org/) ![aiofiles](https://img.shields.io/badge/aiofiles-24.1.0-blue) [![aiohttp](https://img.shields.io/static/v1?label=aiohttp&message=3.10.5&logo=Aiohttp&colorColor=Aiohttp)](https://docs.aiohttp.org/en/stable/) [![cloudscraper](https://img.shields.io/badge/cloudscraper-GitHub-orange)](https://github.com/venomous/cloudscraper) ![tqdm](https://img.shields.io/static/v1?label=tqdm&message=4.66.5&logo=tqdm&colorColor=tqdm) [![License](https://img.shields.io/badge/License-MIT-green)]()
+[![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python&logoColor=python)](https://www.python.org) ![Pyrogram version](https://img.shields.io/badge/Pyrogram-2.0.106-orange?logo=Pyrogram) [![aiofiles](https://img.shields.io/badge/aiofiles-24.1.0-blue?logo=aiofiles)](https://github.com/Tinche/aiofiles) [![certifi](https://img.shields.io/badge/certifi-2024.12.14-blue?logo=certifi)](https://github.com/certifi/python-certifi) [![cloudscraper](https://img.shields.io/badge/cloudscraper-1.2.71-orange?logo=cloudscraper)](https://github.com/venomous/cloudscraper) [![fake-useragent](https://img.shields.io/badge/fake-useragent?logo=fake-useragent)](https://github.com/fake-useragent/fake-useragent) [![PyYAML](https://img.shields.io/badge/PyYAML-6.0.2-blue?logo=PyYAML)](https://github.com/yaml/pyyaml) [![tqdm](https://img.shields.io/badge/tqdm-4.67.1-blue?logo=tqdm)](https://github.com/tqdm/tqdm) [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 **Nexul** is a tool for automating actions. It asynchronously manages multiple Telegram sessions for mini-applications within Telegram. 
 
@@ -9,13 +9,14 @@
 1. **Fetches Balance and Game Tickets**: Retrieves the current balance and the number of game tickets.
 2. **Collects Daily Rewards**: Automatically collects daily rewards from the application.
 3. **Claims Time-Based Rewards**: Claims rewards that become available over time.
-4. **Claims Referral Rewards**: Automatically collects rewards for referring other users.
-5. **Plays Games**: Automates game playing within the app.
+4. **Claims Referral's Rewards**: Automatically collects rewards for referring other users.
+~~5. **Plays Games**: Automates game playing within the app.~~
+6. **Completion of tasks**: Performing social tasks (subscriptions, conversions).
 
 Each session runs **asynchronously**, performing all tasks independently from other sessions at different times. Additionally, the claiming of rewards is done at **random intervals**, imitating real user behavior to avoid patterns that could trigger anti-bot systems.
 
 ---
-## Install 
+## Installation
 
 ### Clone repository
 ```sh
@@ -26,8 +27,8 @@ cd Nexul
 ### Installing the virtual environment and packages
 
 ```sh
-python3 -m venv venv
-source ./venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip3 install -r requirements.txt
 ```
 
